@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity(),
     private var errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private var charListStateFlow: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
     private var errorMessage: String = ""
+    private val buffer: MutableList<String> = mutableListOf()
+    private var dataPartIndex = 0;
 
     private val ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION"
 
@@ -112,12 +114,12 @@ class MainActivity : ComponentActivity(),
                 port = driver.ports[0] // Most devices have just one port (port 0)
                 port!!.open(connection)
                 port!!.setParameters(
-                    115200,
+                    230400,
                     UsbSerialPort.DATABITS_8,
                     UsbSerialPort.STOPBITS_1,
                     UsbSerialPort.PARITY_NONE
                 )
-                
+
                 val usbIoManager = SerialInputOutputManager(port, this)
                 usbIoManager.start()
             } else {
@@ -154,31 +156,53 @@ class MainActivity : ComponentActivity(),
     }
 
     override fun onNewData(data: ByteArray?) {
-        data?.let {
-            val charStrArray = String(it).trim().toCharArray()
-            if (charStrArray.size != 160) {
-                errorStateFlow.value = true
-                errorMessage = "DataByteArray size is ${it.size}\nCharArray size is ${charStrArray.size}"
-                return
-            }
-            errorStateFlow.value = false
-            val charList = mutableListOf<String>()
-            for (i in 0..157 step 2) {
-                val charStr = charStrArray[i].toString() + charStrArray[i + 1].toString()
-                when (charStr) {
-                    GameChar.AIR -> charList.add("Air")
-                    GameChar.BLACK_HOLE -> charList.add("Hole")
-                    GameChar.MONSTER -> charList.add("Monster")
-                    GameChar.NORMAL_STEP -> charList.add("NormalStep")
-                    GameChar.BROKEN_STEP -> charList.add("BrokenStep")
-                    GameChar.SPRINT_STEP -> charList.add("SprintStep")
-                    GameChar.BULLET -> charList.add("Bullet")
-                    GameChar.DOODLER_UP -> charList.add("DoodlerUp")
-                    GameChar.DOODLER_DOWN -> charList.add("DoodlerDown")
-                    else -> charList.add("UNKNOWN")
+        runOnUiThread {
+            data?.let {
+                val charStrArray = String(it).trim().toCharArray()
+                if (charStrArray.size != 41) {
+                    errorStateFlow.value = true
+                    errorMessage =
+                        "DataByteArray size is ${it.size}\nCharArray size is ${charStrArray.size}"
+                    return@let
                 }
+                if (charStrArray.last() != dataPartIndex.toChar()) {
+                    errorStateFlow.value = true
+                    errorMessage = "Expect part $dataPartIndex of data, but receive ${charStrArray.last()}"
+                    dataPartIndex = 0
+                    buffer.clear()
+                    return@let
+                }
+
+                errorStateFlow.value = false
+
+                if (dataPartIndex == 0)
+                    buffer.clear()
+
+                val charList = mutableListOf<String>()
+                for (i in 0..37 step 2) {
+                    when (charStrArray[i].toString() + charStrArray[i + 1].toString()) {
+                        GameChar.AIR -> charList.add("Air")
+                        GameChar.BLACK_HOLE -> charList.add("Hole")
+                        GameChar.MONSTER -> charList.add("Monster")
+                        GameChar.NORMAL_STEP -> charList.add("NormalStep")
+                        GameChar.BROKEN_STEP -> charList.add("BrokenStep")
+                        GameChar.SPRINT_STEP -> charList.add("SprintStep")
+                        GameChar.BULLET -> charList.add("Bullet")
+                        GameChar.DOODLER_UP -> charList.add("DoodlerUp")
+                        GameChar.DOODLER_DOWN -> charList.add("DoodlerDown")
+                        else -> charList.add("UNKNOWN")
+                    }
+                }
+
+                buffer.addAll(charList)
+
+                if (dataPartIndex == 3) {
+                    charListStateFlow.value = charList
+                    dataPartIndex = -1
+                }
+
+                dataPartIndex++
             }
-            charListStateFlow.value = charList
         }
     }
 
