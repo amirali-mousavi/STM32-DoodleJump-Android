@@ -25,31 +25,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.consumeAllChanges
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.ExperimentalUnitApi
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
-import com.hoho.android.usbserial.driver.UsbSerialPort
-import com.hoho.android.usbserial.driver.UsbSerialProber
-import com.hoho.android.usbserial.util.SerialInputOutputManager
+import com.felhr.usbserial.UsbSerialDevice
+import com.felhr.usbserial.UsbSerialInterface
 import com.mousavi.stm32doodlejump.ui.theme.STM32DoodleJumpTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
 
-class MainActivity : ComponentActivity(),
-    SerialInputOutputManager.Listener {
+class MainActivity : ComponentActivity() {
 
-    private var errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
-    private var charListStateFlow: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
+    private val errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val charListStateFlow: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
     private var errorMessage: String = ""
+    private var dataStringStateFlow: MutableStateFlow<String> = MutableStateFlow("")
     private val buffer: MutableList<String> = mutableListOf()
     private var dataPartIndex = 0;
 
     private val ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION"
 
     private lateinit var manager: UsbManager
-    private var port: UsbSerialPort? = null
+    private var device: UsbDevice? = null
+    private var serial: UsbSerialDevice? = null
 
     private val usbReceiver = object : BroadcastReceiver() {
 
@@ -70,8 +69,6 @@ class MainActivity : ComponentActivity(),
             }
         }
     }
-
-    private lateinit var device: UsbDevice
 
     @ExperimentalAnimationApi
     @ExperimentalUnitApi
@@ -103,61 +100,60 @@ class MainActivity : ComponentActivity(),
             manager.requestPermission(device, permissionIntent)
         }
 
-        val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager)
-
-        if (availableDrivers.size != 0) {
+        if (device != null) {
             // Open a connection to the first available driver.
-            val driver = availableDrivers[0]
-            val connection = manager.openDevice(driver.device)
+            val connection = manager.openDevice(device)
 
             if (connection != null) {
-                port = driver.ports[0] // Most devices have just one port (port 0)
-                port!!.open(connection)
-                port!!.setParameters(
-                    230400,
-                    UsbSerialPort.DATABITS_8,
-                    UsbSerialPort.STOPBITS_1,
-                    UsbSerialPort.PARITY_NONE
-                )
+                serial = UsbSerialDevice.createUsbSerialDevice(device, connection)
+                serial!!.open()
+                serial!!.setBaudRate(230400)
+                serial!!.setDataBits(UsbSerialInterface.DATA_BITS_8)
+                serial!!.setStopBits(UsbSerialInterface.STOP_BITS_1)
+                serial!!.setParity(UsbSerialInterface.PARITY_NONE)
+                serial!!.setFlowControl(UsbSerialInterface.FLOW_CONTROL_OFF)
+                serial!!.read {
+                    handleReceiveData(it)
+                }
 
-                val usbIoManager = SerialInputOutputManager(port, this)
-                usbIoManager.start()
             } else {
                 errorStateFlow.value = true
                 errorMessage = "Connection is null"
             }
         } else {
             errorStateFlow.value = true
-            errorMessage = "No Available drivers"
+            errorMessage = "No Available device"
         }
 
         setContent {
             STM32DoodleJumpTheme {
                 val charList by charListStateFlow.collectAsState()
                 val hasError by errorStateFlow.collectAsState()
+                val dataString by dataStringStateFlow.collectAsState()
                 App(
                     charList,
                     hasError,
                     errorMessage,
-                    port?.readEndpoint?.maxPacketSize ?: -1,
+                    dataString,
                     onSwipe = {
                         if (it == 0) { // Right
-                            port?.write("control-right----------".toByteArray(), 1000)
+                            serial?.write("control-right----------".toByteArray())
                         } else if (it == 1) { // Left
-                            port?.write("control-left-----------".toByteArray(), 1000)
+                            serial?.write("control-left-----------".toByteArray())
                         }
                     },
                     onClick = {
-                        port?.write("control-fire-----------".toByteArray(), 1000)
+                        serial?.write("control-fire-----------".toByteArray())
                     }
                 )
             }
         }
     }
 
-    override fun onNewData(data: ByteArray?) {
+    private fun handleReceiveData(data: ByteArray?) {
         runOnUiThread {
             data?.let {
+                dataStringStateFlow.value = String(it).trim()
                 val charStrArray = String(it).trim().toCharArray()
                 if (charStrArray.size != 41) {
                     errorStateFlow.value = true
@@ -165,7 +161,7 @@ class MainActivity : ComponentActivity(),
                         "DataByteArray size is ${it.size}\nCharArray size is ${charStrArray.size}"
                     return@let
                 }
-                if (charStrArray.last() != dataPartIndex.toChar()) {
+                if (charStrArray.last().digitToInt() != dataPartIndex) {
                     errorStateFlow.value = true
                     errorMessage = "Expect part $dataPartIndex of data, but receive ${charStrArray.last()}"
                     dataPartIndex = 0
@@ -205,16 +201,6 @@ class MainActivity : ComponentActivity(),
             }
         }
     }
-
-    override fun onRunError(e: Exception?) {
-        e?.let {
-            it.localizedMessage?.let { localizedMessage ->
-                errorStateFlow.value = true
-                errorMessage = localizedMessage
-            }
-        }
-    }
-
 }
 
 @ExperimentalAnimationApi
@@ -224,7 +210,7 @@ fun App(
     charList: List<String>,
     hasError: Boolean,
     errorMessage: String,
-    bufferSize: Int = 0,
+    dataString: String,
     onSwipe: (Int) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
@@ -288,15 +274,17 @@ fun App(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.align(Alignment.Center)
+                    modifier = Modifier.align(Alignment.TopCenter)
                 ) {
+                    Spacer(modifier = Modifier.height(20.dp))
+
                     Text(
                         text = "ERROR",
                         color = Color.Red,
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(30.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Text(
                         text = errorMessage,
@@ -304,25 +292,15 @@ fun App(
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(30.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Text(
-                        text = bufferSize.toString(),
+                        text = dataString,
                         color = Color.Blue,
                         textAlign = TextAlign.Center
                     )
                 }
             }
         }
-    }
-}
-
-@ExperimentalAnimationApi
-@ExperimentalUnitApi
-@Preview(showBackground = true)
-@Composable
-fun DefaultPreview() {
-    STM32DoodleJumpTheme {
-        App(mutableListOf(), false, "")
     }
 }
