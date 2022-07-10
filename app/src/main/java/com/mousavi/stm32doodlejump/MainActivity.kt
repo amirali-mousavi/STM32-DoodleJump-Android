@@ -35,6 +35,7 @@ import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import com.mousavi.stm32doodlejump.ui.theme.STM32DoodleJumpTheme
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlin.random.Random
 
 
 class MainActivity : ComponentActivity(),
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity(),
     private var errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private var charListStateFlow: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
     private var errorMessage: String = ""
+    private var buffer = ""
 
     private val ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION"
 
@@ -78,10 +80,10 @@ class MainActivity : ComponentActivity(),
 
         val list = mutableListOf<String>()
         for (i in 0..19) {
-            list.add("-")
-            list.add("-")
-            list.add("-")
-            list.add("-")
+            list.add("Doodle")
+            list.add("Doodle")
+            list.add("Doodle")
+            list.add("Doodle")
         }
         charListStateFlow.value = list
 
@@ -112,7 +114,7 @@ class MainActivity : ComponentActivity(),
                 port = driver.ports[0] // Most devices have just one port (port 0)
                 port!!.open(connection)
                 port!!.setParameters(
-                    115200,
+                    230400,
                     UsbSerialPort.DATABITS_8,
                     UsbSerialPort.STOPBITS_1,
                     UsbSerialPort.PARITY_NONE
@@ -137,11 +139,12 @@ class MainActivity : ComponentActivity(),
                     charList,
                     hasError,
                     errorMessage,
-                    port?.readEndpoint?.maxPacketSize ?: -1,
                     onSwipe = {
                         if (it == 0) { // Right
+                            Log.i("SEYED", "Swipe : RIGHT")
                             port?.write("control-right----------".toByteArray(), 1000)
                         } else if (it == 1) { // Left
+                            Log.i("SEYED", "Swipe : LEFT")
                             port?.write("control-left-----------".toByteArray(), 1000)
                         }
                     },
@@ -154,31 +157,8 @@ class MainActivity : ComponentActivity(),
     }
 
     override fun onNewData(data: ByteArray?) {
-        data?.let {
-            val charStrArray = String(it).trim().toCharArray()
-            if (charStrArray.size != 160) {
-                errorStateFlow.value = true
-                errorMessage = "DataByteArray size is ${it.size}\nCharArray size is ${charStrArray.size}"
-                return
-            }
-            errorStateFlow.value = false
-            val charList = mutableListOf<String>()
-            for (i in 0..157 step 2) {
-                val charStr = charStrArray[i].toString() + charStrArray[i + 1].toString()
-                when (charStr) {
-                    GameChar.AIR -> charList.add("Air")
-                    GameChar.BLACK_HOLE -> charList.add("Hole")
-                    GameChar.MONSTER -> charList.add("Monster")
-                    GameChar.NORMAL_STEP -> charList.add("NormalStep")
-                    GameChar.BROKEN_STEP -> charList.add("BrokenStep")
-                    GameChar.SPRINT_STEP -> charList.add("SprintStep")
-                    GameChar.BULLET -> charList.add("Bullet")
-                    GameChar.DOODLER_UP -> charList.add("DoodlerUp")
-                    GameChar.DOODLER_DOWN -> charList.add("DoodlerDown")
-                    else -> charList.add("UNKNOWN")
-                }
-            }
-            charListStateFlow.value = charList
+        runOnUiThread {
+            handleReceivedData(data)
         }
     }
 
@@ -187,6 +167,36 @@ class MainActivity : ComponentActivity(),
             it.localizedMessage?.let { localizedMessage ->
                 errorStateFlow.value = true
                 errorMessage = localizedMessage
+            }
+        }
+    }
+
+    private fun handleReceivedData(data: ByteArray?) {
+        data?.let {
+            errorStateFlow.value = false
+            buffer += String(it)
+            if (buffer.length == 160) {
+                val charList = mutableListOf<String>()
+                for (i in 0..158 step 2) {
+                    when (buffer[i].toString() + buffer[i + 1].toString()) {
+                        GameChar.AIR -> charList.add("Air")
+                        GameChar.BLACK_HOLE -> charList.add("Hole")
+                        GameChar.MONSTER -> charList.add("Monster")
+                        GameChar.NORMAL_STEP -> charList.add("NormalStep")
+                        GameChar.BROKEN_STEP -> charList.add("BrokenStep")
+                        GameChar.SPRINT_STEP -> charList.add("SprintStep")
+                        GameChar.BULLET -> charList.add("Bullet")
+                        GameChar.DOODLER_UP -> charList.add("DoodlerUp")
+                        GameChar.DOODLER_DOWN -> charList.add("DoodlerDown")
+                        else -> charList.add("UNKNOWN")
+                    }
+                }
+                charListStateFlow.value = charList
+                buffer = ""
+            }
+            if (buffer.length > 160) {
+                errorStateFlow.value = true
+                errorMessage = "Buffer size is more than 160"
             }
         }
     }
@@ -200,7 +210,6 @@ fun App(
     charList: List<String>,
     hasError: Boolean,
     errorMessage: String,
-    bufferSize: Int = 0,
     onSwipe: (Int) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
@@ -247,7 +256,8 @@ fun App(
                     for (column in 0..3) {
                         Text(
                             text = charList[row * 4 + column],
-                            Modifier.weight(1f),
+                            Modifier.fillMaxHeight().weight(1f)
+                                .background(Color(Random.nextLong(0xFF000000, 0xFFFFFFFF))),
                             fontSize = TextUnit(2f, TextUnitType.Em),
                             textAlign = TextAlign.Center
                         )
@@ -256,7 +266,7 @@ fun App(
             }
         }
 
-        AnimatedVisibility(visible = hasError, Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible = false, Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -277,14 +287,6 @@ fun App(
                     Text(
                         text = errorMessage,
                         color = Color.Red,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(30.dp))
-
-                    Text(
-                        text = bufferSize.toString(),
-                        color = Color.Blue,
                         textAlign = TextAlign.Center
                     )
                 }
