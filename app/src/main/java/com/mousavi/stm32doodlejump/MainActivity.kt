@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity(),
     SerialInputOutputManager.Listener {
 
     private var errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
-    private var charListStateFlow: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
+    private var charListStateFlow: MutableStateFlow<List<Int>> = MutableStateFlow(emptyList())
     private var errorMessage: String = ""
     private var buffer = ""
 
@@ -78,12 +78,9 @@ class MainActivity : ComponentActivity(),
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val list = mutableListOf<String>()
-        for (i in 0..19) {
-            list.add("Doodle")
-            list.add("Doodle")
-            list.add("Doodle")
-            list.add("Doodle")
+        val list = mutableListOf<Int>()
+        for (i in 0..79) {
+            list.add(-1)
         }
         charListStateFlow.value = list
 
@@ -176,19 +173,19 @@ class MainActivity : ComponentActivity(),
             errorStateFlow.value = false
             buffer += String(it)
             if (buffer.length == 160) {
-                val charList = mutableListOf<String>()
+                val charList = mutableListOf<Int>()
                 for (i in 0..158 step 2) {
                     when (buffer[i].toString() + buffer[i + 1].toString()) {
-                        GameChar.AIR -> charList.add("Air")
-                        GameChar.BLACK_HOLE -> charList.add("Hole")
-                        GameChar.MONSTER -> charList.add("Monster")
-                        GameChar.NORMAL_STEP -> charList.add("NormalStep")
-                        GameChar.BROKEN_STEP -> charList.add("BrokenStep")
-                        GameChar.SPRINT_STEP -> charList.add("SprintStep")
-                        GameChar.BULLET -> charList.add("Bullet")
-                        GameChar.DOODLER_UP -> charList.add("DoodlerUp")
-                        GameChar.DOODLER_DOWN -> charList.add("DoodlerDown")
-                        else -> charList.add("UNKNOWN")
+                        GameChar.AIR -> charList.add(-1)
+                        GameChar.BLACK_HOLE -> charList.add(R.drawable.hole)
+                        GameChar.MONSTER -> charList.add(R.drawable.monster)
+                        GameChar.NORMAL_STEP -> charList.add(R.drawable.normal_step)
+                        GameChar.BROKEN_STEP -> charList.add(R.drawable.broken_step)
+                        GameChar.SPRINT_STEP -> charList.add(R.drawable.spring_step)
+                        GameChar.BULLET -> charList.add(R.drawable.bullet)
+                        GameChar.DOODLER_UP -> charList.add(R.drawable.doodler_up)
+                        GameChar.DOODLER_DOWN -> charList.add(R.drawable.doodler_down)
+                        else -> charList.add(-1)
                     }
                 }
                 charListStateFlow.value = charList
@@ -201,106 +198,4 @@ class MainActivity : ComponentActivity(),
         }
     }
 
-}
-
-@ExperimentalAnimationApi
-@ExperimentalUnitApi
-@Composable
-fun App(
-    charList: List<String>,
-    hasError: Boolean,
-    errorMessage: String,
-    onSwipe: (Int) -> Unit = {},
-    onClick: () -> Unit = {}
-) {
-    var direction by remember { mutableStateOf(-1) }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.White)
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDrag = { change, dragAmount ->
-                        change.consumeAllChanges()
-                        val (x, y) = dragAmount
-                        when {
-                            x > 0 -> {
-                                // Right
-                                direction = 0
-                            }
-                            x < 0 -> {
-                                // Left
-                                direction = 1
-                            }
-                        }
-                    },
-                    onDragEnd = {
-                        when (direction) {
-                            0 -> {
-                                onSwipe(direction)
-                            }
-                            1 -> {
-                                onSwipe(direction)
-                            }
-                        }
-                    }
-                )
-            }
-            .clickable {
-                onClick()
-            }
-    ) {
-        Column(Modifier.fillMaxSize()) {
-            for (row in 0..19) {
-                Row(Modifier.weight(1f)) {
-                    for (column in 0..3) {
-                        Text(
-                            text = charList[row * 4 + column],
-                            Modifier.fillMaxHeight().weight(1f)
-                                .background(Color(Random.nextLong(0xFF000000, 0xFFFFFFFF))),
-                            fontSize = TextUnit(2f, TextUnitType.Em),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-        }
-
-        AnimatedVisibility(visible = false, Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x9A000000))
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.align(Alignment.Center)
-                ) {
-                    Text(
-                        text = "ERROR",
-                        color = Color.Red,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(30.dp))
-
-                    Text(
-                        text = errorMessage,
-                        color = Color.Red,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-    }
-}
-
-@ExperimentalAnimationApi
-@ExperimentalUnitApi
-@Preview(showBackground = true)
-@Composable
-fun DefaultPreview() {
-    STM32DoodleJumpTheme {
-        App(mutableListOf(), false, "")
-    }
 }
