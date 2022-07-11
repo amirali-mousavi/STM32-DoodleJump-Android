@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,10 +26,13 @@ import kotlin.random.Random
 @ExperimentalAnimationApi
 @ExperimentalUnitApi
 @Composable
-fun App(
+fun AppScreen(
     charList: List<Int>,
     hasError: Boolean,
     errorMessage: String,
+    isLost: Boolean,
+    gameScore: Int,
+    gameDifficulty: Int,
     onSwipe: (Int) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
@@ -43,11 +47,11 @@ fun App(
                         change.consumeAllChanges()
                         val (x, y) = dragAmount
                         when {
-                            x > 0 -> {
+                            x > 10 -> {
                                 // Right
                                 direction = 0
                             }
-                            x < 0 -> {
+                            x < -10 -> {
                                 // Left
                                 direction = 1
                             }
@@ -69,20 +73,68 @@ fun App(
                 onClick()
             }
     ) {
+        Text(
+            text = gameScore.toString(),
+            color = Color.White,
+            modifier = Modifier
+                .background(Color(0x4D000000), RoundedCornerShape(bottomEnd = 10.dp))
+                .padding(horizontal = 20.dp, vertical = 10.dp)
+                .align(Alignment.TopStart)
+        )
         Column(Modifier.fillMaxSize()) {
             for (row in 0..19) {
                 Row(Modifier.weight(1f)) {
                     for (column in 0..3) {
                         GameScreenCell(
                             imageId = charList[row * 4 + column],
-                            modifier = Modifier.fillMaxHeight().weight(1f)
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .weight(1f)
                         )
                     }
                 }
             }
         }
 
-        AnimatedVisibility(visible = false, Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible = isLost, Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x9A000000))
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .background(Color(0xFFF7E5AB), RoundedCornerShape(20.dp))
+                        .padding(30.dp)
+                ) {
+                    Text(
+                        text = "Game over!",
+                        color = Color(0xFF086800),
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "Your score: $gameScore",
+                        color = Color(0xFF086800),
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "Difficulty: $gameDifficulty",
+                        color = Color(0xFF086800),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(visible = hasError, Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

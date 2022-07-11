@@ -1,55 +1,49 @@
 package com.mousavi.stm32doodlejump
 
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
+import android.content.*
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.consumeAllChanges
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.ExperimentalUnitApi
-import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.TextUnitType
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import com.mousavi.stm32doodlejump.ui.theme.STM32DoodleJumpTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlin.random.Random
+import kotlinx.coroutines.launch
+import java.util.*
 
 
 class MainActivity : ComponentActivity(),
     SerialInputOutputManager.Listener {
 
-    private var errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
-    private var charListStateFlow: MutableStateFlow<List<Int>> = MutableStateFlow(emptyList())
+    private val charListStateFlow: MutableStateFlow<List<Int>> = MutableStateFlow(emptyList())
+    private val loseStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val errorStateFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private var errorMessage: String = ""
-    private var buffer = ""
+    private var gameScore: Int = 0
+    private var gameDifficulty = 0
+    private var buffer: String = ""
+    private var bufferSize: Int = 168
+    private var receiveDataType: ReceiveDataType = ReceiveDataType.GAME_SCREEN
 
     private val ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION"
 
     private lateinit var manager: UsbManager
+    private lateinit var device: UsbDevice
     private var port: UsbSerialPort? = null
+
+    private lateinit var sharedPref: SharedPreferences
 
     private val usbReceiver = object : BroadcastReceiver() {
 
@@ -71,12 +65,12 @@ class MainActivity : ComponentActivity(),
         }
     }
 
-    private lateinit var device: UsbDevice
-
     @ExperimentalAnimationApi
     @ExperimentalUnitApi
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        sharedPref = getSharedPreferences("doodler-data-save", MODE_PRIVATE)
 
         val list = mutableListOf<Int>()
         for (i in 0..79) {
@@ -119,6 +113,8 @@ class MainActivity : ComponentActivity(),
                 
                 val usbIoManager = SerialInputOutputManager(port, this)
                 usbIoManager.start()
+
+                sendTime()
             } else {
                 errorStateFlow.value = true
                 errorMessage = "Connection is null"
@@ -132,10 +128,14 @@ class MainActivity : ComponentActivity(),
             STM32DoodleJumpTheme {
                 val charList by charListStateFlow.collectAsState()
                 val hasError by errorStateFlow.collectAsState()
-                App(
+                val isLost by loseStateFlow.collectAsState()
+                AppScreen(
                     charList,
                     hasError,
                     errorMessage,
+                    isLost,
+                    gameScore,
+                    gameDifficulty,
                     onSwipe = {
                         if (it == 0) { // Right
                             Log.i("SEYED", "Swipe : RIGHT")
@@ -147,8 +147,28 @@ class MainActivity : ComponentActivity(),
                     },
                     onClick = {
                         port?.write("control-fire-----------".toByteArray(), 1000)
+                        Log.i("SEYED", "CLICKED")
                     }
                 )
+            }
+        }
+    }
+
+    private fun sendTime() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            while (true) {
+                port?.let {
+                    val calendar = Calendar.getInstance()
+                    val year = calendar.get(Calendar.YEAR) % 2000
+                    val month = if (calendar.get(Calendar.MONTH) + 1 > 9) calendar.get(Calendar.MONTH) + 1 else "0${calendar.get(Calendar.MONTH) + 1}"
+                    val day = if (calendar.get(Calendar.DAY_OF_MONTH) > 9) calendar.get(Calendar.DAY_OF_MONTH) else "0${calendar.get(Calendar.DAY_OF_MONTH)}"
+                    val hour = if (calendar.get(Calendar.HOUR_OF_DAY) > 9) calendar.get(Calendar.HOUR_OF_DAY) else "0${calendar.get(Calendar.HOUR_OF_DAY)}"
+                    val min = if (calendar.get(Calendar.MINUTE) > 9) calendar.get(Calendar.MINUTE) else "0${calendar.get(Calendar.MINUTE)}"
+                    val sec = if (calendar.get(Calendar.SECOND) > 9) calendar.get(Calendar.SECOND) else "0${calendar.get(Calendar.SECOND)}"
+                    val dataStr = "$year/$month/$day-$hour:$min:$sec"
+                    it.write("clock-$dataStr".toByteArray(), 1000)
+                }
+                delay(30000)
             }
         }
     }
@@ -171,31 +191,95 @@ class MainActivity : ComponentActivity(),
     private fun handleReceivedData(data: ByteArray?) {
         data?.let {
             errorStateFlow.value = false
-            buffer += String(it)
-            if (buffer.length == 160) {
-                val charList = mutableListOf<Int>()
-                for (i in 0..158 step 2) {
-                    when (buffer[i].toString() + buffer[i + 1].toString()) {
-                        GameChar.AIR -> charList.add(-1)
-                        GameChar.BLACK_HOLE -> charList.add(R.drawable.hole)
-                        GameChar.MONSTER -> charList.add(R.drawable.monster)
-                        GameChar.NORMAL_STEP -> charList.add(R.drawable.normal_step)
-                        GameChar.BROKEN_STEP -> charList.add(R.drawable.broken_step)
-                        GameChar.SPRINT_STEP -> charList.add(R.drawable.spring_step)
-                        GameChar.BULLET -> charList.add(R.drawable.bullet)
-                        GameChar.DOODLER_UP -> charList.add(R.drawable.doodler_up)
-                        GameChar.DOODLER_DOWN -> charList.add(R.drawable.doodler_down)
-                        else -> charList.add(-1)
+
+            val dataStr = String(it)
+            if (buffer.isEmpty()) {
+                when (dataStr[0].digitToInt()) {
+                    0 -> {
+                        bufferSize = 166
+                        receiveDataType = ReceiveDataType.GAME_SCREEN
+                    }
+                    1 -> {
+                        bufferSize = 416
+                        receiveDataType = ReceiveDataType.SAVE
+                    }
+                    2 -> {
+                        bufferSize = 13
+                        receiveDataType = ReceiveDataType.LOAD
                     }
                 }
-                charListStateFlow.value = charList
+            }
+
+            buffer += dataStr
+
+            if (buffer.length == bufferSize) {
+                if (receiveDataType == ReceiveDataType.GAME_SCREEN) {
+                    updateGameScreen()
+                }
+                else if (receiveDataType == ReceiveDataType.SAVE) {
+                    saveData()
+                }
+                else if (receiveDataType == ReceiveDataType.LOAD) {
+                    loadData()
+                }
+
                 buffer = ""
             }
-            if (buffer.length > 160) {
+
+            if (buffer.length > bufferSize) {
                 errorStateFlow.value = true
-                errorMessage = "Buffer size is more than 160"
+                errorMessage = "Buffer size is more than $bufferSize"
             }
         }
     }
 
+    private fun updateGameScreen() {
+        val charList = mutableListOf<Int>()
+        for (i in 1..159 step 2) {
+            when (buffer[i].toString() + buffer[i + 1].toString()) {
+                GameChar.AIR -> charList.add(-1)
+                GameChar.BLACK_HOLE -> charList.add(R.drawable.hole)
+                GameChar.MONSTER -> charList.add(R.drawable.monster)
+                GameChar.NORMAL_STEP -> charList.add(R.drawable.normal_step)
+                GameChar.BROKEN_STEP -> charList.add(R.drawable.broken_step)
+                GameChar.SPRINT_STEP -> charList.add(R.drawable.spring_step)
+                GameChar.BULLET -> charList.add(R.drawable.bullet)
+                GameChar.DOODLER_UP -> charList.add(R.drawable.doodler_up)
+                GameChar.DOODLER_DOWN -> charList.add(R.drawable.doodler_down)
+                GameChar.DIZZY_DOODLER_UP -> charList.add(R.drawable.dizzy_doodler_up)
+                else -> charList.add(-1)
+            }
+        }
+
+        gameScore = buffer.substring(161, 164).toInt()
+        gameDifficulty = buffer[164].digitToInt()
+
+        if (buffer[165].digitToInt() == 1) { // Lose
+            charList.clear()
+            for (i in 0..79) charList.add(-1)
+            loseStateFlow.value = true
+        }
+        else
+            loseStateFlow.value = false
+
+        charListStateFlow.value = charList
+    }
+
+    private fun saveData() {
+        sharedPref
+            .edit()
+            .putString("data", buffer)
+            .apply()
+    }
+
+    private fun loadData() {
+        if (sharedPref.contains("data")) {
+            val dataStr = sharedPref.getString("data", "")
+            lifecycleScope.launch(Dispatchers.IO) {
+                port?.write("load-approve-----------".toByteArray(), 1000)
+                delay(10)
+                port?.write("loading-$dataStr".toByteArray(), 1000)
+            }
+        }
+    }
 }
